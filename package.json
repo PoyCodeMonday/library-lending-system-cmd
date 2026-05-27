@@ -1,0 +1,20 @@
+{
+  "name": "library-lending-system",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.30.2",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @library-lending/api --filter @library-lending/web dev",
+    "dev:api": "pnpm --filter @library-lending/api dev",
+    "dev:web": "pnpm --filter @library-lending/web dev",
+    "build": "pnpm --recursive build",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.4.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.60.0"
+  }
+}
