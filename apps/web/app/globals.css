@@ -223,6 +223,10 @@ h3 {
   font-weight: 700;
 }
 
+.member-loan-tabs {
+  margin-bottom: 12px;
+}
+
 .search-field,
 .field input,
 .field select {

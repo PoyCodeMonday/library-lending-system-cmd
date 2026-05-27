@@ -113,6 +113,7 @@ export default function Home() {
   const [loanFilter, setLoanFilter] = useState("");
   const [loanDateOverride, setLoanDateOverride] = useState("");
   const [returnDateOverride, setReturnDateOverride] = useState("");
+  const [memberLoanTab, setMemberLoanTab] = useState<"active" | "history">("active");
   const [authMode, setAuthMode] = useState<"signup" | "member" | "librarian">("signup");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -201,6 +202,7 @@ export default function Home() {
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     const form = new FormData(event.currentTarget);
     setSaving(true);
     setError(null);
@@ -232,7 +234,7 @@ export default function Home() {
       setUser(auth.user);
       setSuccess(auth.user.role === "librarian" ? "Librarian signed in." : "Member signed in.");
       await refreshForRole(auth.user);
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to sign in.");
     } finally {
@@ -281,6 +283,7 @@ export default function Home() {
 
   async function handleAddBook(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     const form = new FormData(event.currentTarget);
     setSaving(true);
     setError(null);
@@ -297,7 +300,7 @@ export default function Home() {
         })
       });
       setSuccess("Book added to catalog.");
-      event.currentTarget.reset();
+      formElement.reset();
       await refreshForRole();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to add book.");
@@ -446,8 +449,10 @@ export default function Home() {
               activeLoans={activeMemberLoans}
               history={loanHistory}
               loanDateOverride={loanDateOverride}
+              loanTab={memberLoanTab}
               member={user.member}
               onLoanDateOverrideChange={setLoanDateOverride}
+              onLoanTabChange={setMemberLoanTab}
               rules={rules}
             />
           ) : null}
@@ -569,28 +574,52 @@ function MemberPanel({
   activeLoans,
   history,
   loanDateOverride,
+  loanTab,
   member,
   onLoanDateOverrideChange,
+  onLoanTabChange,
   rules
 }: {
   activeLoans: Loan[];
   history: Loan[];
   loanDateOverride: string;
+  loanTab: "active" | "history";
   member: PublicMember | null;
   onLoanDateOverrideChange: (value: string) => void;
+  onLoanTabChange: (value: "active" | "history") => void;
   rules: Rules | null;
 }) {
+  const visibleLoans = loanTab === "active" ? activeLoans : history;
+
   return (
     <>
       <section className="tool-panel">
         <div className="panel-header compact">
           <div>
             <h2>{member?.name ?? "Member"}</h2>
-            <p>{activeLoans.length} active loans</p>
+            <p>
+              {activeLoans.length} active · {history.length} returned
+            </p>
           </div>
           <BookOpen size={22} />
         </div>
-        <LoanList loans={activeLoans} />
+        <div className="status-tabs stretch member-loan-tabs" role="tablist" aria-label="Member loans">
+          <button
+            className={loanTab === "active" ? "active" : ""}
+            onClick={() => onLoanTabChange("active")}
+            type="button"
+          >
+            Active
+          </button>
+          <button
+            className={loanTab === "history" ? "active" : ""}
+            onClick={() => onLoanTabChange("history")}
+            type="button"
+          >
+            History
+          </button>
+        </div>
+        <LoanList loans={visibleLoans} />
       </section>
 
       <section className="tool-panel rules-panel">
@@ -612,16 +641,6 @@ function MemberPanel({
         <p>{rules?.finePerOverdueWeekdayThb ?? 20} THB per overdue weekday</p>
       </section>
 
-      <section className="tool-panel">
-        <div className="panel-header compact">
-          <div>
-            <h2>History</h2>
-            <p>{history.length} returned loans</p>
-          </div>
-          <Check size={22} />
-        </div>
-        <LoanList loans={history} />
-      </section>
     </>
   );
 }
