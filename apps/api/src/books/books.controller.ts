@@ -14,6 +14,7 @@ import type { BookCategory, LoanStatus, Session, UserRole } from "./books.types"
 import { AddBookDto } from "./dto/add-book.dto";
 import { CreateLoanDto } from "./dto/create-loan.dto";
 import { LoginDto } from "./dto/login.dto";
+import { ReturnLoanDto } from "./dto/return-loan.dto";
 import { SignupDto } from "./dto/signup.dto";
 
 interface HttpRequest {
@@ -126,9 +127,9 @@ export class BooksController {
   }
 
   @Post("loans/:id/return")
-  async returnLoan(@Param("id") id: string, @Req() request: HttpRequest) {
+  async returnLoan(@Param("id") id: string, @Body() dto: ReturnLoanDto, @Req() request: HttpRequest) {
     requireRole(await this.getSession(request), "librarian");
-    return this.booksService.returnLoan(id);
+    return this.booksService.returnLoan(id, dto);
   }
 
   @Get("reports/overdue.pdf")

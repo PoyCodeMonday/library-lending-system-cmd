@@ -30,7 +30,36 @@ pnpm db:seed
 pnpm build
 pnpm lint
 pnpm typecheck
+pnpm verify:cases
 ```
+
+## Testing loan and return dates
+
+For fast grading and fine-calculation checks, the app lets testers set dates directly.
+
+- Member UI: after logging in as a member, set `Loan date` in the side panel before clicking a catalog borrow button.
+- Librarian UI: after logging in as librarian, set `Return date` above the active-loans list before clicking a return button.
+- API: `POST /loans` accepts optional `borrowedAt`.
+- API: `POST /loans/:id/return` accepts optional `returnedAt`.
+
+Date values can be `YYYY-MM-DD`, any ISO date/time string, omitted, or `now`. Omitted/`now` uses the current time.
+
+Example:
+
+```bash
+curl -X POST "$API_URL/loans" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: library_session=<member-session>" \
+  -d '{"bookId":"book-id","borrowedAt":"2026-05-11"}'
+
+curl -X POST "$API_URL/loans/<loan-id>/return" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: library_session=<librarian-session>" \
+  -d '{"returnedAt":"2026-05-18"}'
+```
+
+The verification suite uses these API date fields and writes:
+`reports/lending-rule-verification.md`.
 
 ## Database
 

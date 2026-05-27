@@ -111,6 +111,8 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | BookCategory>("all");
   const [loanFilter, setLoanFilter] = useState("");
+  const [loanDateOverride, setLoanDateOverride] = useState("");
+  const [returnDateOverride, setReturnDateOverride] = useState("");
   const [authMode, setAuthMode] = useState<"signup" | "member" | "librarian">("signup");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -263,7 +265,10 @@ export default function Home() {
     try {
       const loan = await api<Loan>("/loans", {
         method: "POST",
-        body: JSON.stringify({ bookId })
+        body: JSON.stringify({
+          bookId,
+          ...(loanDateOverride ? { borrowedAt: loanDateOverride } : {})
+        })
       });
       setSuccess(`Loan ${loan.loanCode} created. Due ${formatDate(loan.dueAt)}.`);
       await refreshForRole();
@@ -307,7 +312,10 @@ export default function Home() {
     setSuccess(null);
 
     try {
-      const loan = await api<Loan>(`/loans/${loanId}/return`, { method: "POST" });
+      const loan = await api<Loan>(`/loans/${loanId}/return`, {
+        method: "POST",
+        body: JSON.stringify(returnDateOverride ? { returnedAt: returnDateOverride } : {})
+      });
       setSuccess(`Returned ${loan.loanCode}. Fine: ${loan.fineThb} THB.`);
       await refreshForRole();
     } catch (requestError) {
@@ -437,7 +445,9 @@ export default function Home() {
             <MemberPanel
               activeLoans={activeMemberLoans}
               history={loanHistory}
+              loanDateOverride={loanDateOverride}
               member={user.member}
+              onLoanDateOverrideChange={setLoanDateOverride}
               rules={rules}
             />
           ) : null}
@@ -449,7 +459,9 @@ export default function Home() {
               onAddBook={handleAddBook}
               onFilterChange={setLoanFilter}
               onReturnLoan={handleReturnLoan}
+              onReturnDateOverrideChange={setReturnDateOverride}
               overdueLoans={overdueLoans}
+              returnDateOverride={returnDateOverride}
               saving={saving}
             />
           ) : null}
@@ -535,18 +547,20 @@ function Field({
   name,
   placeholder,
   type = "text",
-  min
+  min,
+  required = true
 }: {
   label: string;
   name: string;
   placeholder?: string;
   type?: string;
   min?: number;
+  required?: boolean;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input min={min} name={name} placeholder={placeholder} required type={type} />
+      <input min={min} name={name} placeholder={placeholder} required={required} type={type} />
     </label>
   );
 }
@@ -554,12 +568,16 @@ function Field({
 function MemberPanel({
   activeLoans,
   history,
+  loanDateOverride,
   member,
+  onLoanDateOverrideChange,
   rules
 }: {
   activeLoans: Loan[];
   history: Loan[];
+  loanDateOverride: string;
   member: PublicMember | null;
+  onLoanDateOverrideChange: (value: string) => void;
   rules: Rules | null;
 }) {
   return (
@@ -577,6 +595,14 @@ function MemberPanel({
 
       <section className="tool-panel rules-panel">
         <h2>Loan Rules</h2>
+        <label className="field">
+          <span>Loan date</span>
+          <input
+            onChange={(event) => onLoanDateOverrideChange(event.target.value)}
+            type="date"
+            value={loanDateOverride}
+          />
+        </label>
         {rules?.categories.map((item) => (
           <div className="rule-row" key={item.category}>
             <span>{item.category}</span>
@@ -606,7 +632,9 @@ function LibrarianPanel({
   onAddBook,
   onFilterChange,
   onReturnLoan,
+  onReturnDateOverrideChange,
   overdueLoans,
+  returnDateOverride,
   saving
 }: {
   activeLoans: Loan[];
@@ -614,7 +642,9 @@ function LibrarianPanel({
   onAddBook: (event: FormEvent<HTMLFormElement>) => void;
   onFilterChange: (value: string) => void;
   onReturnLoan: (loanId: string) => void;
+  onReturnDateOverrideChange: (value: string) => void;
   overdueLoans: Loan[];
+  returnDateOverride: string;
   saving: boolean;
 }) {
   return (
@@ -661,6 +691,14 @@ function LibrarianPanel({
             onChange={(event) => onFilterChange(event.target.value)}
             placeholder="Member, email, loan code"
             value={loanFilter}
+          />
+        </label>
+        <label className="field">
+          <span>Return date</span>
+          <input
+            onChange={(event) => onReturnDateOverrideChange(event.target.value)}
+            type="date"
+            value={returnDateOverride}
           />
         </label>
         <LoanList loans={activeLoans} onReturnLoan={onReturnLoan} saving={saving} />

@@ -15,6 +15,7 @@ import { PrismaService } from "../prisma.service";
 import { AddBookDto } from "./dto/add-book.dto";
 import { CreateLoanDto } from "./dto/create-loan.dto";
 import { LoginDto } from "./dto/login.dto";
+import { ReturnLoanDto } from "./dto/return-loan.dto";
 import { SignupDto } from "./dto/signup.dto";
 import {
   AuthUser,
@@ -191,7 +192,7 @@ export class BooksService {
         throw new BadRequestException("No copies are currently available for this book.");
       }
 
-      const borrowedAt = getNow();
+      const borrowedAt = parseInputDate(dto.borrowedAt, "loan date");
       const dueAt = addDays(borrowedAt, loanPeriods[book.category as BookCategory]);
       const created = await tx.loan.create({
         data: {
@@ -262,7 +263,7 @@ export class BooksService {
     return this.listLoans({ status: "overdue" });
   }
 
-  async returnLoan(loanId: string): Promise<LoanView> {
+  async returnLoan(loanId: string, dto: ReturnLoanDto = {}): Promise<LoanView> {
     return this.prisma.$transaction(async (tx) => {
       const loan = await tx.loan.findUnique({
         where: { id: loanId },
@@ -276,7 +277,7 @@ export class BooksService {
         throw new BadRequestException("This loan has already been returned.");
       }
 
-      const returnedAt = getNow();
+      const returnedAt = parseInputDate(dto.returnedAt, "return date");
       await tx.book.update({
         where: { id: loan.bookId },
         data: {
@@ -301,23 +302,16 @@ export class BooksService {
 
   async buildOverdueReportPdf(): Promise<Buffer> {
     const loans = await this.listOverdueLoans();
-    const rows = loans.map((loan) => [
-      loan.member.name,
-      loan.member.email,
-      loan.book.title,
-      loan.loanCode,
-      formatDate(loan.dueAt),
-      `${loan.currentFineThb} THB`
-    ]);
+    const rows = loans.map((loan) => ({
+      book: loan.book.title,
+      dueDate: formatDate(loan.dueAt),
+      email: loan.member.email,
+      fine: `${loan.currentFineThb} THB`,
+      loanCode: loan.loanCode,
+      member: loan.member.name
+    }));
 
-    return buildSimplePdf([
-      "Overdue Loans Report",
-      `Generated: ${formatDate(new Date())}`,
-      "",
-      "Member | Email | Book | Loan Code | Due Date | Fine",
-      ...rows.map((row) => row.join(" | ")),
-      rows.length === 0 ? "No overdue loans." : ""
-    ]);
+    return buildOverdueReportPdf(rows, getNow());
   }
 
   getRules() {
@@ -446,6 +440,22 @@ function getNow(): Date {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
+function parseInputDate(value: string | undefined, label: string): Date {
+  const normalized = value?.trim();
+  if (!normalized || normalized.toLowerCase() === "now") {
+    return getNow();
+  }
+
+  const parsed = new Date(
+    /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T10:00:00.000Z` : normalized
+  );
+  if (Number.isNaN(parsed.getTime())) {
+    throw new BadRequestException(`Invalid ${label}. Use YYYY-MM-DD, an ISO date, or now.`);
+  }
+
+  return parsed;
+}
+
 function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -530,20 +540,213 @@ function pdfEscape(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function buildSimplePdf(lines: string[]): Buffer {
+interface OverdueReportRow {
+  book: string;
+  dueDate: string;
+  email: string;
+  fine: string;
+  loanCode: string;
+  member: string;
+}
+
+interface PdfPage {
+  content: string[];
+  pageNumber: number;
+}
+
+interface PdfColumn {
+  key: keyof OverdueReportRow;
+  label: string;
+  width: number;
+}
+
+const pdfPageWidth = 842;
+const pdfPageHeight = 595;
+const pdfMargin = 36;
+
+const overdueReportColumns: PdfColumn[] = [
+  { key: "member", label: "Member", width: 125 },
+  { key: "email", label: "Email", width: 175 },
+  { key: "book", label: "Book", width: 165 },
+  { key: "loanCode", label: "Loan Code", width: 90 },
+  { key: "dueDate", label: "Due Date", width: 100 },
+  { key: "fine", label: "Fine", width: 80 }
+];
+
+function buildOverdueReportPdf(rows: OverdueReportRow[], generatedAt: Date): Buffer {
+  const pages: PdfPage[] = [];
+  let page = createPdfPage(1, generatedAt, rows.length);
+  pages.push(page);
+  let y = 462;
+
+  if (rows.length === 0) {
+    drawText(page, "No overdue loans.", pdfMargin, y, 12);
+  }
+
+  rows.forEach((row, index) => {
+    const wrapped = overdueReportColumns.map((column) =>
+      wrapPdfText(row[column.key], column.width - 12, 9)
+    );
+    const rowHeight = Math.max(28, 14 + Math.max(...wrapped.map((lines) => lines.length)) * 12);
+
+    if (y - rowHeight < 44) {
+      page = createPdfPage(pages.length + 1, generatedAt, rows.length);
+      pages.push(page);
+      y = 462;
+    }
+
+    drawReportRow(page, row, wrapped, y, rowHeight, index % 2 === 0);
+    y -= rowHeight;
+  });
+
+  pages.forEach((currentPage, index) => {
+    drawText(
+      currentPage,
+      `Page ${index + 1} of ${pages.length}`,
+      pdfPageWidth - pdfMargin - 70,
+      24,
+      8,
+      "F1",
+      "0.35 0.39 0.45"
+    );
+  });
+
+  return buildPdfDocument(pages);
+}
+
+function createPdfPage(pageNumber: number, generatedAt: Date, totalRows: number): PdfPage {
+  const page: PdfPage = { content: [], pageNumber };
+  drawText(page, "Overdue Loans Report", pdfMargin, 548, 18, "F2", "0.08 0.09 0.11");
+  drawText(
+    page,
+    `Generated: ${formatDate(generatedAt)}  |  Overdue loans: ${totalRows}`,
+    pdfMargin,
+    528,
+    9,
+    "F1",
+    "0.35 0.39 0.45"
+  );
+  drawTableHeader(page, 486);
+  return page;
+}
+
+function drawTableHeader(page: PdfPage, y: number): void {
+  drawRect(page, pdfMargin, y, tableWidth(), 24, "0.89 0.91 0.94");
+  let x = pdfMargin;
+  overdueReportColumns.forEach((column) => {
+    drawText(page, column.label, x + 6, y + 8, 9, "F2", "0.08 0.09 0.11");
+    drawLine(page, x, y, x, y + 24, "0.72 0.76 0.82");
+    x += column.width;
+  });
+  drawLine(page, pdfMargin + tableWidth(), y, pdfMargin + tableWidth(), y + 24, "0.72 0.76 0.82");
+  drawLine(page, pdfMargin, y, pdfMargin + tableWidth(), y, "0.72 0.76 0.82");
+  drawLine(page, pdfMargin, y + 24, pdfMargin + tableWidth(), y + 24, "0.72 0.76 0.82");
+}
+
+function drawReportRow(
+  page: PdfPage,
+  row: OverdueReportRow,
+  wrapped: string[][],
+  y: number,
+  rowHeight: number,
+  shaded: boolean
+): void {
+  if (shaded) {
+    drawRect(page, pdfMargin, y - rowHeight, tableWidth(), rowHeight, "0.98 0.99 1");
+  }
+
+  let x = pdfMargin;
+  overdueReportColumns.forEach((column, columnIndex) => {
+    const lines = wrapped[columnIndex] ?? [row[column.key]];
+    lines.forEach((line, lineIndex) => {
+      drawText(page, line, x + 6, y - 14 - lineIndex * 12, 9);
+    });
+    drawLine(page, x, y - rowHeight, x, y, "0.82 0.85 0.9");
+    x += column.width;
+  });
+  drawLine(page, pdfMargin + tableWidth(), y - rowHeight, pdfMargin + tableWidth(), y, "0.82 0.85 0.9");
+  drawLine(page, pdfMargin, y - rowHeight, pdfMargin + tableWidth(), y - rowHeight, "0.82 0.85 0.9");
+}
+
+function wrapPdfText(value: string, width: number, fontSize: number): string[] {
+  const maxChars = Math.max(8, Math.floor(width / (fontSize * 0.52)));
+  const words = value.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    const chunks = splitLongWord(word, maxChars);
+    chunks.forEach((chunk) => {
+      const next = current ? `${current} ${chunk}` : chunk;
+      if (next.length > maxChars && current) {
+        lines.push(current);
+        current = chunk;
+      } else {
+        current = next;
+      }
+    });
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length ? lines : [""];
+}
+
+function splitLongWord(word: string, maxChars: number): string[] {
+  if (word.length <= maxChars) {
+    return [word];
+  }
+
+  const chunks: string[] = [];
+  for (let index = 0; index < word.length; index += maxChars) {
+    chunks.push(word.slice(index, index + maxChars));
+  }
+  return chunks;
+}
+
+function tableWidth(): number {
+  return overdueReportColumns.reduce((sum, column) => sum + column.width, 0);
+}
+
+function drawText(
+  page: PdfPage,
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  font = "F1",
+  color = "0.12 0.14 0.17"
+): void {
+  page.content.push(`BT /${font} ${size} Tf ${color} rg ${x} ${y} Td (${pdfEscape(text)}) Tj ET`);
+}
+
+function drawRect(page: PdfPage, x: number, y: number, width: number, height: number, color: string): void {
+  page.content.push(`q ${color} rg ${x} ${y} ${width} ${height} re f Q`);
+}
+
+function drawLine(page: PdfPage, x1: number, y1: number, x2: number, y2: number, color: string): void {
+  page.content.push(`q ${color} RG 0.6 w ${x1} ${y1} m ${x2} ${y2} l S Q`);
+}
+
+function buildPdfDocument(pages: PdfPage[]): Buffer {
   const objects: string[] = [];
-  const content = lines
-    .filter((line) => line.length > 0)
-    .map((line, index) => `BT /F1 10 Tf 40 ${780 - index * 18} Td (${pdfEscape(line)}) Tj ET`)
-    .join("\n");
 
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
-  objects.push("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  objects.push(
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
-  );
+  const pageObjectIds = pages.map((_, index) => 3 + index * 2);
+  objects.push(`<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`);
+  pages.forEach((page, index) => {
+    const pageObjectId = 3 + index * 2;
+    const contentObjectId = pageObjectId + 1;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfPageWidth} ${pdfPageHeight}] /Resources << /Font << /F1 ${pages.length * 2 + 3} 0 R /F2 ${pages.length * 2 + 4} 0 R >> >> /Contents ${contentObjectId} 0 R >>`
+    );
+    const content = page.content.join("\n");
+    objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
+  });
   objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
 
   let body = "%PDF-1.4\n";
   const offsets = [0];

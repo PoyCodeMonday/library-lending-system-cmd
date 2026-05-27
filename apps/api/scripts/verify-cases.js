@@ -206,21 +206,22 @@ async function createLoanRecord({ label, bookId, memberId, borrowedAt, dueAt, re
   });
 }
 
-async function borrow(cookie, bookId, label) {
+async function borrow(cookie, bookId, label, borrowedAt) {
   const result = await requestJson("/loans", {
     method: "POST",
     cookie,
-    body: { bookId }
+    body: { bookId, ...(borrowedAt ? { borrowedAt } : {}) }
   });
   assertOk(result, `${label} borrow`);
   assert.match(result.body.loanCode, /^LL-[A-Z0-9-]+$/);
   return result.body;
 }
 
-async function markReturned(librarianCookie, loanId, label) {
+async function markReturned(librarianCookie, loanId, label, returnedAt) {
   const result = await requestJson(`/loans/${loanId}/return`, {
     method: "POST",
-    cookie: librarianCookie
+    cookie: librarianCookie,
+    body: returnedAt ? { returnedAt } : undefined
   });
   assertOk(result, `${label} return`);
   return result.body;
@@ -251,7 +252,7 @@ async function main() {
 
   setNow("2026-05-27T10:00:00.000Z");
   const memberOne = await signupMember("member-one");
-  const novelLoan = await borrow(memberOne.cookie, catalogNovel.id, "case 1 novel");
+  const novelLoan = await borrow(memberOne.cookie, catalogNovel.id, "case 1 novel", "2026-05-27");
   assert.equal(daysBetween(novelLoan.borrowedAt, novelLoan.dueAt), 14, "case 1 novel due date");
   recordPass(
     1,
@@ -261,7 +262,7 @@ async function main() {
     `Loan ${novelLoan.loanCode}; borrowed ${iso(novelLoan.borrowedAt)}; due ${iso(novelLoan.dueAt)}.`
   );
 
-  const textbookLoan = await borrow(memberOne.cookie, catalogTextbook.id, "case 2 textbook");
+  const textbookLoan = await borrow(memberOne.cookie, catalogTextbook.id, "case 2 textbook", "2026-05-27");
   assert.equal(daysBetween(textbookLoan.borrowedAt, textbookLoan.dueAt), 3, "case 2 textbook due date");
   recordPass(
     2,
@@ -271,7 +272,7 @@ async function main() {
     `Loan ${textbookLoan.loanCode}; borrowed ${iso(textbookLoan.borrowedAt)}; due ${iso(textbookLoan.dueAt)}.`
   );
 
-  const sameDayReturn = await markReturned(librarianCookie, textbookLoan.id, "case 3 same-day");
+  const sameDayReturn = await markReturned(librarianCookie, textbookLoan.id, "case 3 same-day", "2026-05-27");
   assert.equal(sameDayReturn.fineThb, 0, "case 3 same-day fine");
   recordPass(
     3,
@@ -283,11 +284,19 @@ async function main() {
 
   const textbookFixedBook = await createBook("textbook", 1, "textbook-fixed");
   const memberFour = await signupMember("member-four");
-  setNow("2026-05-11T10:00:00.000Z");
-  const fixedTextbookLoan = await borrow(memberFour.cookie, textbookFixedBook.id, "case 4 fixed textbook");
+  const fixedTextbookLoan = await borrow(
+    memberFour.cookie,
+    textbookFixedBook.id,
+    "case 4 fixed textbook",
+    "2026-05-11"
+  );
   assert.equal(iso(fixedTextbookLoan.dueAt), "2026-05-14", "case 4 due date");
-  setNow("2026-05-18T10:00:00.000Z");
-  const fixedTextbookReturn = await markReturned(librarianCookie, fixedTextbookLoan.id, "case 4 fixed textbook");
+  const fixedTextbookReturn = await markReturned(
+    librarianCookie,
+    fixedTextbookLoan.id,
+    "case 4 fixed textbook",
+    "2026-05-18"
+  );
   assert.equal(fixedTextbookReturn.fineThb, 40, "case 4 fine");
   recordPass(
     4,
@@ -364,11 +373,19 @@ async function main() {
 
   const generalFixedBook = await createBook("general", 1, "general-fixed");
   const memberEight = await signupMember("member-eight");
-  setNow("2026-04-27T10:00:00.000Z");
-  const generalLoan = await borrow(memberEight.cookie, generalFixedBook.id, "case 8 fixed general");
+  const generalLoan = await borrow(
+    memberEight.cookie,
+    generalFixedBook.id,
+    "case 8 fixed general",
+    "2026-04-27"
+  );
   assert.equal(iso(generalLoan.dueAt), "2026-05-04", "case 8 due date");
-  setNow("2026-05-18T10:00:00.000Z");
-  const generalReturn = await markReturned(librarianCookie, generalLoan.id, "case 8 fixed general");
+  const generalReturn = await markReturned(
+    librarianCookie,
+    generalLoan.id,
+    "case 8 fixed general",
+    "2026-05-18"
+  );
   assert.equal(generalReturn.fineThb, 200, "case 8 fine");
   recordPass(
     8,
