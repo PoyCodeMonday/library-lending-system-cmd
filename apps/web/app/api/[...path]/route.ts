@@ -87,8 +87,10 @@ async function forward(request: Request): Promise<Response> {
     {}
   )) as {
     body?: string;
+    cookies?: string[];
     headers?: Record<string, string>;
     isBase64Encoded?: boolean;
+    multiValueHeaders?: Record<string, string[]>;
     statusCode?: number;
   };
 
@@ -96,6 +98,10 @@ async function forward(request: Request): Promise<Response> {
   for (const [key, value] of Object.entries(result.headers ?? {})) {
     responseHeaders.set(key, value);
   }
+  for (const [key, values] of Object.entries(result.multiValueHeaders ?? {})) {
+    values.forEach((value) => responseHeaders.append(key, value));
+  }
+  result.cookies?.forEach((cookie) => responseHeaders.append("set-cookie", cookie));
 
   const contentType = responseHeaders.get("content-type")?.toLowerCase() ?? "";
   const binaryResponse = /^(application\/(pdf|octet-stream)|image\/)/.test(contentType);

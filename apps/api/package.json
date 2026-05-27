@@ -14,6 +14,7 @@
     "db:migrate:dev": "node scripts/run-with-env.js prisma migrate dev",
     "db:seed": "node scripts/run-with-env.js prisma db seed",
     "db:studio": "node scripts/run-with-env.js prisma studio",
+    "verify:cases": "node scripts/run-with-env.js node scripts/verify-cases.js",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"

@@ -14,6 +14,7 @@
     "db:seed": "pnpm --filter @library-lending/api db:seed",
     "db:studio": "pnpm --filter @library-lending/api db:studio",
     "lint": "pnpm --recursive lint",
+    "verify:cases": "pnpm --filter @library-lending/api verify:cases",
     "typecheck": "pnpm --recursive typecheck"
   },
   "devDependencies": {

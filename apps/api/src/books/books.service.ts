@@ -41,6 +41,7 @@ const categoryLabels: Record<BookCategory, string> = {
 const finePerWeekdayThb = 20;
 const maxActiveLoansPerMember = 3;
 const sessionTtlMs = 8 * 60 * 60 * 1000;
+const transactionOptions = { maxWait: 10_000, timeout: 20_000 };
 
 type LoanWithRelations = PrismaLoan & {
   book: PrismaBook;
@@ -171,7 +172,8 @@ export class BooksService {
         throw new BadRequestException("A member can hold at most 3 active loans.");
       }
 
-      if (activeLoans.some((loan) => this.getLoanStatus(loan, new Date()) === "overdue")) {
+      const referenceDate = getNow();
+      if (activeLoans.some((loan) => this.getLoanStatus(loan, referenceDate) === "overdue")) {
         throw new BadRequestException("A member with an overdue loan cannot borrow more.");
       }
 
@@ -189,13 +191,12 @@ export class BooksService {
         throw new BadRequestException("No copies are currently available for this book.");
       }
 
-      const borrowedAt = new Date();
+      const borrowedAt = getNow();
       const dueAt = addDays(borrowedAt, loanPeriods[book.category as BookCategory]);
-      const loanCount = await tx.loan.count();
       const created = await tx.loan.create({
         data: {
           id: `loan-${Date.now()}`,
-          loanCode: `LL-${1000 + loanCount + 1}`,
+          loanCode: generateLoanCode(),
           bookId: book.id,
           memberId: member.id,
           borrowedAt,
@@ -215,7 +216,7 @@ export class BooksService {
       }
 
       return this.toLoanView(loan);
-    });
+    }, transactionOptions);
   }
 
   async listMemberLoans(memberId: string): Promise<LoanView[]> {
@@ -275,7 +276,7 @@ export class BooksService {
         throw new BadRequestException("This loan has already been returned.");
       }
 
-      const returnedAt = new Date();
+      const returnedAt = getNow();
       await tx.book.update({
         where: { id: loan.bookId },
         data: {
@@ -295,7 +296,7 @@ export class BooksService {
       });
 
       return this.toLoanView(updated);
-    });
+    }, transactionOptions);
   }
 
   async buildOverdueReportPdf(): Promise<Buffer> {
@@ -411,10 +412,10 @@ export class BooksService {
       dueAt: loan.dueAt.toISOString(),
       returnedAt: loan.returnedAt?.toISOString() ?? null,
       fineThb: loan.fineThb,
-      status: this.getLoanStatus(loan, new Date()),
+      status: this.getLoanStatus(loan, getNow()),
       currentFineThb: loan.returnedAt
         ? loan.fineThb
-        : calculateFineThb(loan.borrowedAt, loan.dueAt, new Date()),
+        : calculateFineThb(loan.borrowedAt, loan.dueAt, getNow()),
       book: this.toPublicBook(loan.book),
       member: this.toPublicMember(loan.member)
     };
@@ -433,6 +434,16 @@ function addDays(date: Date, days: number): Date {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
+}
+
+function getNow(): Date {
+  const override = process.env.LIBRARY_TEST_NOW;
+  if (!override) {
+    return new Date();
+  }
+
+  const parsed = new Date(override);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
 function startOfDay(date: Date): Date {
@@ -501,6 +512,10 @@ function slugify(value: string): string {
       .replace(/^-|-$/g, "")
       .slice(0, 40) || "book"
   );
+}
+
+function generateLoanCode(): string {
+  return `LL-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
 function formatDate(value: Date | string): string {
