@@ -68,7 +68,7 @@ interface Rules {
   maxActiveLoansPerMember: number;
 }
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const categoryOptions: BookCategory[] = ["textbook", "general", "novel"];
 
 function formatDate(value: string) {

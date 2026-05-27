@@ -10,10 +10,22 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@library-lending/api": "workspace:*",
+    "@nestjs/common": "11.1.24",
+    "@nestjs/core": "11.1.24",
+    "@nestjs/platform-express": "11.1.24",
+    "@prisma/client": "6.19.3",
+    "@vendia/serverless-express": "4.12.6",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "dotenv": "17.2.3",
+    "express": "5.2.1",
     "lucide-react": "1.16.0",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@types/node": "25.9.1",

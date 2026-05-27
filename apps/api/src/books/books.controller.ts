@@ -10,7 +10,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { BooksService } from "./books.service";
-import { BookCategory, LoanStatus, Session, UserRole } from "./books.types";
+import type { BookCategory, LoanStatus, Session, UserRole } from "./books.types";
 import { AddBookDto } from "./dto/add-book.dto";
 import { CreateLoanDto } from "./dto/create-loan.dto";
 import { LoginDto } from "./dto/login.dto";

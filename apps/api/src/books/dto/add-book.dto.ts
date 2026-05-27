@@ -1,5 +1,5 @@
 import { IsIn, IsInt, IsNotEmpty, IsString, Max, Min } from "class-validator";
-import { BookCategory } from "../books.types";
+import type { BookCategory } from "../books.types";
 
 export class AddBookDto {
   @IsString()

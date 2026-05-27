@@ -2,6 +2,10 @@
   "name": "@library-lending/api",
   "version": "0.1.0",
   "private": true,
+  "main": "src/serverless.ts",
+  "exports": {
+    ".": "./src/serverless.ts"
+  },
   "scripts": {
     "dev": "nest start --watch",
     "build": "node scripts/run-with-env.js --fallback-url prisma generate && nest build",
@@ -22,6 +26,7 @@
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
     "dotenv": "17.2.3",
+    "express": "5.2.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "serverless-http": "4.0.0"
@@ -29,6 +34,7 @@
   "devDependencies": {
     "@nestjs/cli": "11.0.21",
     "@nestjs/schematics": "11.1.0",
+    "@types/express": "5.0.6",
     "@types/node": "25.9.1",
     "prisma": "6.19.3",
     "ts-loader": "9.5.7",
