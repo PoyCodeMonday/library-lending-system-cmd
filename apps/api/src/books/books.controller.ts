@@ -44,38 +44,38 @@ export class BooksController {
   }
 
   @Post("members/signup")
-  signup(
+  async signup(
     @Body() dto: SignupDto,
     @Res({ passthrough: true }) response: HttpResponse
   ) {
-    const auth = this.booksService.signup(dto);
+    const auth = await this.booksService.signup(dto);
     setSessionCookie(response, auth.sessionId);
     return { user: auth.user };
   }
 
   @Post("auth/login")
-  login(
+  async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) response: HttpResponse
   ) {
-    const auth = this.booksService.login(dto);
+    const auth = await this.booksService.login(dto);
     setSessionCookie(response, auth.sessionId);
     return { user: auth.user };
   }
 
   @Post("auth/logout")
-  logout(
+  async logout(
     @Req() request: HttpRequest,
     @Res({ passthrough: true }) response: HttpResponse
   ) {
-    this.booksService.logout(readSessionId(request));
+    await this.booksService.logout(readSessionId(request));
     clearSessionCookie(response);
     return { ok: true };
   }
 
   @Get("auth/me")
-  me(@Req() request: HttpRequest) {
-    return { user: this.booksService.getAuthUser(readSessionId(request)) };
+  async me(@Req() request: HttpRequest) {
+    return { user: await this.booksService.getAuthUser(readSessionId(request)) };
   }
 
   @Get("books")
@@ -84,14 +84,14 @@ export class BooksController {
   }
 
   @Post("books")
-  addBook(@Body() dto: AddBookDto, @Req() request: HttpRequest) {
-    requireRole(this.getSession(request), "librarian");
+  async addBook(@Body() dto: AddBookDto, @Req() request: HttpRequest) {
+    requireRole(await this.getSession(request), "librarian");
     return this.booksService.addBook(dto);
   }
 
   @Post("loans")
-  createLoan(@Body() dto: CreateLoanDto, @Req() request: HttpRequest) {
-    const session = requireRole(this.getSession(request), "member");
+  async createLoan(@Body() dto: CreateLoanDto, @Req() request: HttpRequest) {
+    const session = requireRole(await this.getSession(request), "member");
     if (!session.memberId) {
       throw new UnauthorizedException("Member session required.");
     }
@@ -100,8 +100,8 @@ export class BooksController {
   }
 
   @Get("me/loans")
-  memberLoans(@Req() request: HttpRequest) {
-    const session = requireRole(this.getSession(request), "member");
+  async memberLoans(@Req() request: HttpRequest) {
+    const session = requireRole(await this.getSession(request), "member");
     if (!session.memberId) {
       throw new UnauthorizedException("Member session required.");
     }
@@ -110,39 +110,39 @@ export class BooksController {
   }
 
   @Get("loans")
-  listLoans(
+  async listLoans(
     @Req() request: HttpRequest,
     @Query("member") member?: string,
     @Query("status") status?: LoanStatus
   ) {
-    requireRole(this.getSession(request), "librarian");
+    requireRole(await this.getSession(request), "librarian");
     return this.booksService.listLoans({ member, status });
   }
 
   @Get("loans/overdue")
-  overdueLoans(@Req() request: HttpRequest) {
-    requireRole(this.getSession(request), "librarian");
+  async overdueLoans(@Req() request: HttpRequest) {
+    requireRole(await this.getSession(request), "librarian");
     return this.booksService.listOverdueLoans();
   }
 
   @Post("loans/:id/return")
-  returnLoan(@Param("id") id: string, @Req() request: HttpRequest) {
-    requireRole(this.getSession(request), "librarian");
+  async returnLoan(@Param("id") id: string, @Req() request: HttpRequest) {
+    requireRole(await this.getSession(request), "librarian");
     return this.booksService.returnLoan(id);
   }
 
   @Get("reports/overdue.pdf")
-  overdueReport(@Req() request: HttpRequest, @Res() response: HttpResponse) {
-    requireRole(this.getSession(request), "librarian");
-    const pdf = this.booksService.buildOverdueReportPdf();
+  async overdueReport(@Req() request: HttpRequest, @Res() response: HttpResponse) {
+    requireRole(await this.getSession(request), "librarian");
+    const pdf = await this.booksService.buildOverdueReportPdf();
     response.setHeader("Content-Type", "application/pdf");
     response.setHeader("Content-Disposition", "attachment; filename=\"overdue-report.pdf\"");
     response.send(pdf);
   }
 
-  private getSession(request: HttpRequest): Session | null {
-    const user = this.booksService.getAuthUser(readSessionId(request));
+  private async getSession(request: HttpRequest): Promise<Session | null> {
     const sessionId = readSessionId(request);
+    const user = await this.booksService.getAuthUser(sessionId);
     if (!user || !sessionId) {
       return null;
     }

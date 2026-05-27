@@ -17,20 +17,56 @@ pnpm dev
 The API runs on `http://localhost:3001` and the web app runs on `http://localhost:3000`.
 
 Set `LIBRARIAN_EMAIL` and `LIBRARIAN_PASSWORD` in `.env` before using librarian login.
+Set `DATABASE_URL` to a Postgres database before running migrations or the API.
 
 ## Useful scripts
 
 ```bash
 pnpm dev:api
 pnpm dev:web
+pnpm db:migrate:dev
+pnpm db:migrate:deploy
+pnpm db:seed
 pnpm build
 pnpm lint
 pnpm typecheck
 ```
 
+## Database
+
+This app uses Postgres through Prisma. Do not edit production tables manually.
+All schema changes should be committed as Prisma migrations under `apps/api/prisma/migrations`.
+
+Development:
+
+```bash
+pnpm db:migrate:dev
+pnpm db:seed
+```
+
+Production/Vercel:
+
+```bash
+pnpm db:migrate:deploy
+pnpm db:seed
+```
+
+The seed script is idempotent and inserts baseline rows for every table:
+`books`, `members`, `sessions`, and `loans`.
+
 ## Deploy to Vercel
 
 Create two Vercel projects from this GitHub repo.
+
+Create a Vercel Postgres database first, then copy its `DATABASE_URL` into the
+API project's environment variables. The API project build command runs:
+
+```bash
+pnpm db:migrate:deploy && pnpm db:seed && pnpm build
+```
+
+That means every production deployment applies committed migrations first, then
+runs the idempotent seed script.
 
 ### API project
 
@@ -44,6 +80,7 @@ Environment variables:
 
 ```bash
 WEB_ORIGIN=https://<your-web-project>.vercel.app
+DATABASE_URL=postgresql://...
 LIBRARIAN_EMAIL=<librarian-email>
 LIBRARIAN_PASSWORD=<strong-password>
 ```

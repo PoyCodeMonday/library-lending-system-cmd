@@ -8,6 +8,11 @@
     "dev:api": "pnpm --filter @library-lending/api dev",
     "dev:web": "pnpm --filter @library-lending/web dev",
     "build": "pnpm --recursive build",
+    "db:generate": "pnpm --filter @library-lending/api db:generate",
+    "db:migrate:deploy": "pnpm --filter @library-lending/api db:migrate:deploy",
+    "db:migrate:dev": "pnpm --filter @library-lending/api db:migrate:dev",
+    "db:seed": "pnpm --filter @library-lending/api db:seed",
+    "db:studio": "pnpm --filter @library-lending/api db:studio",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck"
   },

@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "pnpm build",
+  "buildCommand": "pnpm db:migrate:deploy && pnpm db:seed && pnpm build",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "routes": [
     {

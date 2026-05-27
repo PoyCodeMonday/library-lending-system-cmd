@@ -1,25 +1,28 @@
 import {
   BadRequestException,
   Injectable,
-  UnauthorizedException,
-  NotFoundException
+  NotFoundException,
+  UnauthorizedException
 } from "@nestjs/common";
+import {
+  Book as PrismaBook,
+  Loan as PrismaLoan,
+  Member as PrismaMember,
+  Session as PrismaSession
+} from "@prisma/client";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { PrismaService } from "../prisma.service";
 import { AddBookDto } from "./dto/add-book.dto";
 import { CreateLoanDto } from "./dto/create-loan.dto";
 import { LoginDto } from "./dto/login.dto";
 import { SignupDto } from "./dto/signup.dto";
 import {
   AuthUser,
-  Book,
   BookCategory,
-  Loan,
   LoanStatus,
   LoanView,
-  Member,
   PublicBook,
   PublicMember,
-  Session,
   UserRole
 } from "./books.types";
 
@@ -39,154 +42,76 @@ const finePerWeekdayThb = 20;
 const maxActiveLoansPerMember = 3;
 const sessionTtlMs = 8 * 60 * 60 * 1000;
 
-const booksSeed: Book[] = [
-  {
-    id: "book-clean-code",
-    title: "Clean Code",
-    author: "Robert C. Martin",
-    category: "textbook",
-    totalCopies: 3,
-    availableCopies: 2
-  },
-  {
-    id: "book-pragmatic-programmer",
-    title: "The Pragmatic Programmer",
-    author: "Andrew Hunt and David Thomas",
-    category: "general",
-    totalCopies: 2,
-    availableCopies: 1
-  },
-  {
-    id: "book-designing-data-intensive-apps",
-    title: "Designing Data-Intensive Applications",
-    author: "Martin Kleppmann",
-    category: "textbook",
-    totalCopies: 2,
-    availableCopies: 0
-  },
-  {
-    id: "book-domain-driven-design",
-    title: "Domain-Driven Design",
-    author: "Eric Evans",
-    category: "general",
-    totalCopies: 1,
-    availableCopies: 1
-  },
-  {
-    id: "book-kiki-delivery-service",
-    title: "Kiki's Delivery Service",
-    author: "Eiko Kadono",
-    category: "novel",
-    totalCopies: 2,
-    availableCopies: 2
-  }
-];
+type LoanWithRelations = PrismaLoan & {
+  book: PrismaBook;
+  member: PrismaMember;
+};
 
-const now = new Date();
-
-const membersSeed: Member[] = [
-  {
-    id: "member-nina",
-    name: "Nina Patel",
-    email: "nina@example.com",
-    phone: "+66812345678",
-    passwordHash: hashPassword("member123"),
-    createdAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: "member-theo",
-    name: "Theo Morgan",
-    email: "theo@example.com",
-    phone: "+66887654321",
-    passwordHash: hashPassword("member123"),
-    createdAt: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-
-const loansSeed: Loan[] = [
-  {
-    id: "loan-existing-1",
-    loanCode: "LL-1001",
-    bookId: "book-designing-data-intensive-apps",
-    memberId: "member-nina",
-    borrowedAt: new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-    dueAt: addDays(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000), 3).toISOString(),
-    returnedAt: null,
-    fineThb: 0
-  },
-  {
-    id: "loan-existing-2",
-    loanCode: "LL-1002",
-    bookId: "book-designing-data-intensive-apps",
-    memberId: "member-theo",
-    borrowedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    dueAt: addDays(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), 3).toISOString(),
-    returnedAt: null,
-    fineThb: 0
-  }
-];
+type SessionWithMember = PrismaSession & {
+  member: PrismaMember | null;
+};
 
 @Injectable()
 export class BooksService {
-  private readonly books = booksSeed.map((book) => ({ ...book }));
-  private readonly members = membersSeed.map((member) => ({ ...member }));
-  private readonly loans = loansSeed.map((loan) => ({ ...loan }));
-  private readonly sessions = new Map<string, Session>();
+  constructor(private readonly prisma: PrismaService) {}
 
-  listBooks(filters: { query?: string; category?: BookCategory } = {}): PublicBook[] {
-    const query = filters.query?.trim().toLowerCase();
+  async listBooks(filters: { query?: string; category?: BookCategory } = {}): Promise<PublicBook[]> {
+    const query = filters.query?.trim();
 
-    return this.books
-      .map((book) => this.toPublicBook(book))
-      .filter((book) => {
-        if (filters.category && book.category !== filters.category) {
-          return false;
-        }
+    const books = await this.prisma.book.findMany({
+      where: {
+        ...(filters.category ? { category: filters.category } : {}),
+        ...(query
+          ? {
+              OR: [
+                { title: { contains: query, mode: "insensitive" } },
+                { author: { contains: query, mode: "insensitive" } }
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ title: "asc" }]
+    });
 
-        if (!query) {
-          return true;
-        }
-
-        return [book.title, book.author, book.category].some((value) =>
-          value.toLowerCase().includes(query)
-        );
-      });
+    return books.map((book) => this.toPublicBook(book));
   }
 
-  addBook(dto: AddBookDto): PublicBook {
-    const book: Book = {
-      id: `book-${slugify(dto.title)}-${Date.now()}`,
-      title: dto.title.trim(),
-      author: dto.author.trim(),
-      category: dto.category,
-      totalCopies: dto.copies,
-      availableCopies: dto.copies
-    };
+  async addBook(dto: AddBookDto): Promise<PublicBook> {
+    const book = await this.prisma.book.create({
+      data: {
+        id: `book-${slugify(dto.title)}-${Date.now()}`,
+        title: dto.title.trim(),
+        author: dto.author.trim(),
+        category: dto.category,
+        totalCopies: dto.copies,
+        availableCopies: dto.copies
+      }
+    });
 
-    this.books.push(book);
     return this.toPublicBook(book);
   }
 
-  signup(dto: SignupDto): { user: AuthUser; sessionId: string } {
+  async signup(dto: SignupDto): Promise<{ user: AuthUser; sessionId: string }> {
     const email = dto.email.trim().toLowerCase();
-    if (this.members.some((member) => member.email === email)) {
+    const existing = await this.prisma.member.findUnique({ where: { email } });
+    if (existing) {
       throw new BadRequestException("A member with this email already exists.");
     }
 
-    const member: Member = {
-      id: `member-${Date.now()}`,
-      name: dto.name.trim(),
-      email,
-      phone: dto.phone.trim(),
-      passwordHash: hashPassword(dto.password),
-      createdAt: new Date().toISOString()
-    };
+    const member = await this.prisma.member.create({
+      data: {
+        id: `member-${Date.now()}`,
+        name: dto.name.trim(),
+        email,
+        phone: dto.phone.trim(),
+        passwordHash: hashPassword(dto.password)
+      }
+    });
 
-    this.members.push(member);
     return this.createSession("member", member.id);
   }
 
-  login(dto: LoginDto): { user: AuthUser; sessionId: string } {
+  async login(dto: LoginDto): Promise<{ user: AuthUser; sessionId: string }> {
     const email = dto.email.trim().toLowerCase();
 
     if (dto.role === "librarian") {
@@ -203,7 +128,7 @@ export class BooksService {
       return this.createSession("librarian", null);
     }
 
-    const member = this.members.find((item) => item.email === email);
+    const member = await this.prisma.member.findUnique({ where: { email } });
     if (!member || !verifyPassword(dto.password, member.passwordHash)) {
       throw new UnauthorizedException("Invalid member credentials.");
     }
@@ -211,14 +136,14 @@ export class BooksService {
     return this.createSession("member", member.id);
   }
 
-  logout(sessionId: string | null): void {
+  async logout(sessionId: string | null): Promise<void> {
     if (sessionId) {
-      this.sessions.delete(sessionId);
+      await this.prisma.session.deleteMany({ where: { id: sessionId } });
     }
   }
 
-  getAuthUser(sessionId: string | null): AuthUser | null {
-    const session = this.findSession(sessionId);
+  async getAuthUser(sessionId: string | null): Promise<AuthUser | null> {
+    const session = await this.findSession(sessionId);
     if (!session) {
       return null;
     }
@@ -226,94 +151,155 @@ export class BooksService {
     return this.toAuthUser(session);
   }
 
-  createLoan(dto: CreateLoanDto, memberId: string): LoanView {
-    const member = this.findMember(memberId);
-    const book = this.findBook(dto.bookId);
-    const activeLoans = this.loans.filter(
-      (loan) => loan.memberId === member.id && !loan.returnedAt
-    );
+  async createLoan(dto: CreateLoanDto, memberId: string): Promise<LoanView> {
+    return this.prisma.$transaction(async (tx) => {
+      const member = await tx.member.findUnique({ where: { id: memberId } });
+      if (!member) {
+        throw new NotFoundException("Member not found.");
+      }
 
-    if (activeLoans.length >= maxActiveLoansPerMember) {
-      throw new BadRequestException("A member can hold at most 3 active loans.");
-    }
+      const book = await tx.book.findUnique({ where: { id: dto.bookId } });
+      if (!book) {
+        throw new NotFoundException("Book not found.");
+      }
 
-    if (activeLoans.some((loan) => this.getLoanStatus(loan, new Date()) === "overdue")) {
-      throw new BadRequestException("A member with an overdue loan cannot borrow more.");
-    }
+      const activeLoans = await tx.loan.findMany({
+        where: { memberId: member.id, returnedAt: null }
+      });
 
-    if (book.availableCopies <= 0) {
-      throw new BadRequestException("No copies are currently available for this book.");
-    }
+      if (activeLoans.length >= maxActiveLoansPerMember) {
+        throw new BadRequestException("A member can hold at most 3 active loans.");
+      }
 
-    book.availableCopies -= 1;
+      if (activeLoans.some((loan) => this.getLoanStatus(loan, new Date()) === "overdue")) {
+        throw new BadRequestException("A member with an overdue loan cannot borrow more.");
+      }
 
-    const borrowedAt = new Date();
-    const dueAt = addDays(borrowedAt, loanPeriods[book.category]);
-    const loan: Loan = {
-      id: `loan-${Date.now()}`,
-      loanCode: `LL-${1000 + this.loans.length + 1}`,
-      bookId: book.id,
-      memberId: member.id,
-      borrowedAt: borrowedAt.toISOString(),
-      dueAt: dueAt.toISOString(),
-      returnedAt: null,
-      fineThb: 0
-    };
-
-    this.loans.push(loan);
-    return this.toLoanView(loan);
-  }
-
-  listMemberLoans(memberId: string): LoanView[] {
-    this.findMember(memberId);
-    return this.loans
-      .filter((loan) => loan.memberId === memberId)
-      .map((loan) => this.toLoanView(loan))
-      .sort((a, b) => b.borrowedAt.localeCompare(a.borrowedAt));
-  }
-
-  listLoans(filters: { member?: string; status?: LoanStatus } = {}): LoanView[] {
-    const memberQuery = filters.member?.trim().toLowerCase();
-
-    return this.loans
-      .map((loan) => this.toLoanView(loan))
-      .filter((loan) => {
-        if (filters.status && loan.status !== filters.status) {
-          return false;
+      const updateResult = await tx.book.updateMany({
+        where: {
+          id: book.id,
+          availableCopies: { gt: 0 }
+        },
+        data: {
+          availableCopies: { decrement: 1 }
         }
+      });
 
-        if (!memberQuery) {
-          return true;
+      if (updateResult.count !== 1) {
+        throw new BadRequestException("No copies are currently available for this book.");
+      }
+
+      const borrowedAt = new Date();
+      const dueAt = addDays(borrowedAt, loanPeriods[book.category as BookCategory]);
+      const loanCount = await tx.loan.count();
+      const created = await tx.loan.create({
+        data: {
+          id: `loan-${Date.now()}`,
+          loanCode: `LL-${1000 + loanCount + 1}`,
+          bookId: book.id,
+          memberId: member.id,
+          borrowedAt,
+          dueAt,
+          returnedAt: null,
+          fineThb: 0
         }
+      });
 
-        return [loan.member.name, loan.member.email, loan.loanCode].some((value) =>
-          value.toLowerCase().includes(memberQuery)
-        );
-      })
-      .sort((a, b) => b.borrowedAt.localeCompare(a.borrowedAt));
+      const loan = await tx.loan.findUnique({
+        where: { id: created.id },
+        include: { book: true, member: true }
+      });
+
+      if (!loan) {
+        throw new NotFoundException("Loan not found.");
+      }
+
+      return this.toLoanView(loan);
+    });
   }
 
-  listOverdueLoans(): LoanView[] {
+  async listMemberLoans(memberId: string): Promise<LoanView[]> {
+    const member = await this.prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) {
+      throw new NotFoundException("Member not found.");
+    }
+
+    const loans = await this.prisma.loan.findMany({
+      where: { memberId },
+      include: { book: true, member: true },
+      orderBy: [{ borrowedAt: "desc" }]
+    });
+
+    return loans.map((loan) => this.toLoanView(loan));
+  }
+
+  async listLoans(filters: { member?: string; status?: LoanStatus } = {}): Promise<LoanView[]> {
+    const memberQuery = filters.member?.trim();
+    const loans = await this.prisma.loan.findMany({
+      where: {
+        ...(memberQuery
+          ? {
+              OR: [
+                { loanCode: { contains: memberQuery, mode: "insensitive" } },
+                { book: { title: { contains: memberQuery, mode: "insensitive" } } },
+                { member: { name: { contains: memberQuery, mode: "insensitive" } } },
+                { member: { email: { contains: memberQuery, mode: "insensitive" } } }
+              ]
+            }
+          : {})
+      },
+      include: { book: true, member: true },
+      orderBy: [{ borrowedAt: "desc" }]
+    });
+
+    return loans
+      .map((loan) => this.toLoanView(loan))
+      .filter((loan) => !filters.status || loan.status === filters.status);
+  }
+
+  async listOverdueLoans(): Promise<LoanView[]> {
     return this.listLoans({ status: "overdue" });
   }
 
-  returnLoan(loanId: string): LoanView {
-    const loan = this.findLoan(loanId);
-    if (loan.returnedAt) {
-      throw new BadRequestException("This loan has already been returned.");
-    }
+  async returnLoan(loanId: string): Promise<LoanView> {
+    return this.prisma.$transaction(async (tx) => {
+      const loan = await tx.loan.findUnique({
+        where: { id: loanId },
+        include: { book: true, member: true }
+      });
+      if (!loan) {
+        throw new NotFoundException("Loan not found.");
+      }
 
-    const returnedAt = new Date();
-    const book = this.findBook(loan.bookId);
-    book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
-    loan.returnedAt = returnedAt.toISOString();
-    loan.fineThb = calculateFineThb(loan.borrowedAt, loan.dueAt, returnedAt);
+      if (loan.returnedAt) {
+        throw new BadRequestException("This loan has already been returned.");
+      }
 
-    return this.toLoanView(loan);
+      const returnedAt = new Date();
+      await tx.book.update({
+        where: { id: loan.bookId },
+        data: {
+          availableCopies: {
+            increment: 1
+          }
+        }
+      });
+
+      const updated = await tx.loan.update({
+        where: { id: loan.id },
+        data: {
+          returnedAt,
+          fineThb: calculateFineThb(loan.borrowedAt, loan.dueAt, returnedAt)
+        },
+        include: { book: true, member: true }
+      });
+
+      return this.toLoanView(updated);
+    });
   }
 
-  buildOverdueReportPdf(): Buffer {
-    const loans = this.listOverdueLoans();
+  async buildOverdueReportPdf(): Promise<Buffer> {
+    const loans = await this.listOverdueLoans();
     const rows = loans.map((loan) => [
       loan.member.name,
       loan.member.email,
@@ -325,7 +311,7 @@ export class BooksService {
 
     return buildSimplePdf([
       "Overdue Loans Report",
-      `Generated: ${formatDate(new Date().toISOString())}`,
+      `Generated: ${formatDate(new Date())}`,
       "",
       "Member | Email | Book | Loan Code | Due Date | Fine",
       ...rows.map((row) => row.join(" | ")),
@@ -345,82 +331,68 @@ export class BooksService {
     };
   }
 
-  private createSession(role: UserRole, memberId: string | null): { user: AuthUser; sessionId: string } {
-    const session: Session = {
-      id: randomBytes(32).toString("hex"),
-      role,
-      memberId,
-      expiresAt: Date.now() + sessionTtlMs
-    };
+  private async createSession(
+    role: UserRole,
+    memberId: string | null
+  ): Promise<{ user: AuthUser; sessionId: string }> {
+    const session = await this.prisma.session.create({
+      data: {
+        id: randomBytes(32).toString("hex"),
+        role,
+        memberId,
+        expiresAt: new Date(Date.now() + sessionTtlMs)
+      },
+      include: { member: true }
+    });
 
-    this.sessions.set(session.id, session);
     return {
       user: this.toAuthUser(session),
       sessionId: session.id
     };
   }
 
-  private findSession(sessionId: string | null): Session | null {
+  private async findSession(sessionId: string | null): Promise<SessionWithMember | null> {
     if (!sessionId) {
       return null;
     }
 
-    const session = this.sessions.get(sessionId);
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { member: true }
+    });
     if (!session) {
       return null;
     }
 
-    if (session.expiresAt < Date.now()) {
-      this.sessions.delete(sessionId);
+    if (session.expiresAt.getTime() < Date.now()) {
+      await this.prisma.session.deleteMany({ where: { id: sessionId } });
       return null;
     }
 
     return session;
   }
 
-  private findBook(bookId: string): Book {
-    const book = this.books.find((item) => item.id === bookId);
-    if (!book) {
-      throw new NotFoundException("Book not found.");
-    }
-
-    return book;
-  }
-
-  private findMember(memberId: string): Member {
-    const member = this.members.find((item) => item.id === memberId);
-    if (!member) {
-      throw new NotFoundException("Member not found.");
-    }
-
-    return member;
-  }
-
-  private findLoan(loanId: string): Loan {
-    const loan = this.loans.find((item) => item.id === loanId);
-    if (!loan) {
-      throw new NotFoundException("Loan not found.");
-    }
-
-    return loan;
-  }
-
-  private toAuthUser(session: Session): AuthUser {
+  private toAuthUser(session: SessionWithMember): AuthUser {
     return {
-      role: session.role,
-      member: session.memberId ? this.toPublicMember(this.findMember(session.memberId)) : null
+      role: session.role as UserRole,
+      member: session.member ? this.toPublicMember(session.member) : null
     };
   }
 
-  private toPublicBook(book: Book): PublicBook {
+  private toPublicBook(book: PrismaBook): PublicBook {
     return {
-      ...book,
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      category: book.category as BookCategory,
+      totalCopies: book.totalCopies,
+      availableCopies: book.availableCopies,
       status: book.availableCopies > 0 ? "available" : "unavailable",
-      periodDays: loanPeriods[book.category]
+      periodDays: loanPeriods[book.category as BookCategory]
     };
   }
 
-  private toPublicMember(member: Member): PublicMember {
+  private toPublicMember(member: PrismaMember): PublicMember {
     return {
       id: member.id,
       name: member.name,
@@ -429,26 +401,31 @@ export class BooksService {
     };
   }
 
-  private toLoanView(loan: Loan): LoanView {
-    const book = this.findBook(loan.bookId);
-
+  private toLoanView(loan: LoanWithRelations): LoanView {
     return {
-      ...loan,
+      id: loan.id,
+      loanCode: loan.loanCode,
+      bookId: loan.bookId,
+      memberId: loan.memberId,
+      borrowedAt: loan.borrowedAt.toISOString(),
+      dueAt: loan.dueAt.toISOString(),
+      returnedAt: loan.returnedAt?.toISOString() ?? null,
+      fineThb: loan.fineThb,
       status: this.getLoanStatus(loan, new Date()),
       currentFineThb: loan.returnedAt
         ? loan.fineThb
         : calculateFineThb(loan.borrowedAt, loan.dueAt, new Date()),
-      book: this.toPublicBook(book),
-      member: this.toPublicMember(this.findMember(loan.memberId))
+      book: this.toPublicBook(loan.book),
+      member: this.toPublicMember(loan.member)
     };
   }
 
-  private getLoanStatus(loan: Loan, referenceDate: Date): LoanStatus {
+  private getLoanStatus(loan: Pick<PrismaLoan, "returnedAt" | "dueAt">, referenceDate: Date): LoanStatus {
     if (loan.returnedAt) {
       return "returned";
     }
 
-    return isAfterCalendarDay(referenceDate, new Date(loan.dueAt)) ? "overdue" : "active";
+    return isAfterCalendarDay(referenceDate, loan.dueAt) ? "overdue" : "active";
   }
 }
 
@@ -475,13 +452,12 @@ function isWeekday(date: Date): boolean {
   return day !== 0 && day !== 6;
 }
 
-function calculateFineThb(borrowedAtIso: string, dueAtIso: string, returnedOrToday: Date): number {
-  const borrowedAt = new Date(borrowedAtIso);
+function calculateFineThb(borrowedAt: Date, dueAt: Date, returnedOrToday: Date): number {
   if (isSameCalendarDay(borrowedAt, returnedOrToday)) {
     return 0;
   }
 
-  const dueDate = startOfDay(new Date(dueAtIso));
+  const dueDate = startOfDay(dueAt);
   const endDate = startOfDay(returnedOrToday);
   if (endDate.getTime() <= dueDate.getTime()) {
     return 0;
@@ -527,7 +503,7 @@ function slugify(value: string): string {
   );
 }
 
-function formatDate(value: string): string {
+function formatDate(value: Date | string): string {
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
@@ -548,7 +524,9 @@ function buildSimplePdf(lines: string[]): Buffer {
 
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
   objects.push("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>");
+  objects.push(
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+  );
   objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
 

@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BookCategory {
+  textbook
+  general
+  novel
+}
+
+enum UserRole {
+  member
+  librarian
+}
+
+model Book {
+  id              String       @id @default(cuid())
+  title           String
+  author          String
+  category        BookCategory
+  totalCopies     Int          @map("total_copies")
+  availableCopies Int          @map("available_copies")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  loans           Loan[]
+
+  @@index([category])
+  @@map("books")
+}
+
+model Member {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  phone        String
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  loans        Loan[]
+  sessions     Session[]
+
+  @@index([email])
+  @@map("members")
+}
+
+model Session {
+  id        String   @id
+  role      UserRole
+  memberId  String?  @map("member_id")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  member    Member?  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Loan {
+  id         String    @id @default(cuid())
+  loanCode   String    @unique @map("loan_code")
+  bookId     String    @map("book_id")
+  memberId   String    @map("member_id")
+  borrowedAt DateTime  @map("borrowed_at") @db.Timestamptz(6)
+  dueAt      DateTime  @map("due_at") @db.Timestamptz(6)
+  returnedAt DateTime? @map("returned_at") @db.Timestamptz(6)
+  fineThb    Int       @default(0) @map("fine_thb")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  book       Book      @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  member     Member    @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@index([bookId])
+  @@index([memberId])
+  @@index([dueAt])
+  @@index([returnedAt])
+  @@map("loans")
+}
